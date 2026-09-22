@@ -1,4 +1,4 @@
-# SellerChamp Item - Activate Listing V1.1
+# SellerChamp Item - Activate Listing V1.3
 
 A completely independent SellerChamp app for finding a Product by SKU and relisting it when SellerChamp reports the marketplace listing as inactive.
 
@@ -30,9 +30,36 @@ The included `render.yaml` uses:
 
 Do not put your SellerChamp API token in `public/`.
 
-## V1.1 fix
+## V1.3 fix
 - Corrected the activation request to SellerChamp's documented Product PUT format:
   `PUT /api/products/PRODUCT_ID.json?relist=true`
 - Sends the required JSON wrapper: `{ "product": {} }`.
 - Activation errors now display SellerChamp's returned error details instead of only a generic message.
 - The app still rereads the Product and reports success only after `marketplace_status` verifies as `active`.
+
+## V1.3 diagnostic activation build
+This release is intentionally an isolated diagnostic test bed.
+
+When Activate Listing is pressed, the server tests several relist request shapes one at a time.
+After every attempt it rereads the SellerChamp Product. It STOPS immediately if
+`marketplace_status` becomes `active`.
+
+The phone UI displays:
+- diagnostic method name
+- HTTP result
+- SellerChamp response body
+- marketplace status after the attempt
+- which method, if any, verified ACTIVE
+
+This is designed to identify the exact SellerChamp request format before activation code is
+copied into any other app.
+
+## V1.3 timed diagnostic behavior
+- Rejected request (HTTP error such as 400): record the response and move to the next request shape.
+- Accepted request (2xx): STOP sending relist requests immediately.
+- After an accepted request, reread marketplace status every 10 seconds for up to 5 minutes.
+- If ACTIVE appears, record the activation time and successful method.
+- If still inactive after 5 minutes, report Pending/Not Yet Active and do not send another relist request.
+- Diagnostic display includes accepted/rejected state and the timed status-check history.
+
+This avoids accidentally issuing several relist requests while SellerChamp/eBay is still processing the first accepted request.

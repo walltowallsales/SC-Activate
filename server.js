@@ -85,9 +85,9 @@ app.get('/api/status',async(req,res)=>{
   const pinRequired=!!APP_PIN;
   try{
     await scFetch('/api/marketplace_accounts');
-    res.json({ok:true,version:'1.1',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
+    res.json({ok:true,version:'1.3',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
   }catch(e){
-    res.status(e.status||500).json({ok:false,version:'1.1',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
+    res.status(e.status||500).json({ok:false,version:'1.3',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
   }
 });
 app.get('/api/lookup',async(req,res)=>{
@@ -100,25 +100,111 @@ app.get('/api/lookup',async(req,res)=>{
   }catch(e){res.status(e.status||500).json({error:'SellerChamp lookup failed.',details:e.data||e.message});}
 });
 app.put('/api/products/:id/activate',async(req,res)=>{
-  try{
-    const before=await detail(req.params.id);
-    const beforeN=normalize(before);
-    if(beforeN.active) return res.json({ok:true,alreadyActive:true,product:beforeN});
-    await scFetch(`/api/products/${encodeURIComponent(req.params.id)}.json?relist=true`,{
-      method:'PUT',
-      body:JSON.stringify({product:{}})
-    });
-    let verified=null;
-    for(let i=0;i<5;i++){
-      if(i) await new Promise(r=>setTimeout(r,900));
-      verified=normalize(await detail(req.params.id));
-      if(verified.active) break;
+  const id=encodeURIComponent(req.params.id);
+  const attempts=[];
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+  async function reread(){
+    try { return normalize(await detail(req.params.id)); }
+    catch(e){ return null; }
+  }
+  async function waitForActive(record){
+    // SellerChamp/eBay relisting can be asynchronous. Once SellerChamp accepts a request,
+    // do NOT send another relist format. Poll for up to 5 minutes instead.
+    const started=Date.now();
+    const pollEvery=10000;
+    const maxWait=5*60*1000;
+    record.polls=[];
+    while(Date.now()-started <= maxWait){
+      const p=await reread();
+      const elapsed=Math.round((Date.now()-started)/1000);
+      record.polls.push({elapsed_seconds:elapsed,status:p?.marketplace_status||null});
+      record.after=p;
+      if(p?.active){
+        record.verifiedActive=true;
+        record.activation_seconds=elapsed;
+        return true;
+      }
+      if(Date.now()-started >= maxWait) break;
+      await sleep(pollEvery);
     }
-    if(!verified?.active) return res.status(409).json({error:'SellerChamp accepted the relist request, but the product has not verified as Active yet.',product:verified});
-    res.json({ok:true,verified:true,product:verified});
-  }catch(e){res.status(e.status||500).json({error:'SellerChamp could not activate this listing.',details:e.data||e.message});}
+    record.verifiedActive=false;
+    return false;
+  }
+  async function tryMethod(name, endpoint, body){
+    const record={name,endpoint,body};
+    try{
+      const data=await scFetch(endpoint,{
+        method:'PUT',
+        body: body === undefined ? undefined : JSON.stringify(body)
+      });
+      record.http='2xx';
+      record.accepted=true;
+      record.response=data;
+      attempts.push(record);
+      // Critical V1.3 behavior: an accepted request gets the full wait window.
+      // Never try another request format while an accepted relist may still be processing.
+      await waitForActive(record);
+      return {accepted:true,verified:record.verifiedActive};
+    }catch(e){
+      record.http=e.status||'error';
+      record.accepted=false;
+      record.response=e.data||e.message;
+      record.after=await reread();
+      attempts.push(record);
+      return {accepted:false,verified:false};
+    }
+  }
+
+  try{
+    const beforeRaw=await detail(req.params.id);
+    const before=normalize(beforeRaw);
+    if(before.active) return res.json({ok:true,alreadyActive:true,product:before,attempts:[]});
+
+    const safeProduct={};
+    for(const k of ['sku','title','quantity_available','reserve_quantity','marketplace_status']){
+      if(beforeRaw[k] !== undefined && beforeRaw[k] !== null) safeProduct[k]=beforeRaw[k];
+    }
+
+    const methods=[
+      ['A — .json + relist=true + product payload',`/api/products/${id}.json?relist=true`,{product:safeProduct}],
+      ['B — no .json + relist=true + product payload',`/api/products/${id}?relist=true`,{product:safeProduct}],
+      ['C — .json + relist=true + top-level payload',`/api/products/${id}.json?relist=true`,safeProduct],
+      ['D — no .json + relist=true + top-level payload',`/api/products/${id}?relist=true`,safeProduct],
+      ['E — .json + relist=true + no request body',`/api/products/${id}.json?relist=true`,undefined],
+      ['F — no .json + relist=true + no request body',`/api/products/${id}?relist=true`,undefined]
+    ];
+
+    for(const [name,endpoint,body] of methods){
+      const result=await tryMethod(name,endpoint,body);
+      if(result.accepted){
+        const after=await reread();
+        if(result.verified || after?.active){
+          return res.json({ok:true,verified:true,product:after,attempts});
+        }
+        // Accepted but still inactive after 5 minutes: stop. Do NOT risk another relist request.
+        return res.status(202).json({
+          ok:false,
+          pending:true,
+          error:'SellerChamp accepted the relist request, but the listing has not reported ACTIVE within 5 minutes. No additional relist methods were sent.',
+          product:after,
+          attempts
+        });
+      }
+      // Only an immediately rejected request moves to the next format.
+    }
+
+    const after=await reread();
+    return res.status(409).json({
+      error:'SellerChamp rejected every diagnostic relist request immediately.',
+      product:after,
+      attempts
+    });
+  }catch(e){
+    res.status(e.status||500).json({error:'Activation diagnostics could not complete.',details:e.data||e.message,attempts});
+  }
 });
 
 app.use(express.static(path.join(__dirname,'public')));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-app.listen(PORT,()=>console.log(`Item - Activate Listing V1.1 running on ${PORT}`));
+app.listen(PORT,()=>console.log(`Item - Activate Listing V1.3 running on ${PORT}`));
