@@ -85,9 +85,9 @@ app.get('/api/status',async(req,res)=>{
   const pinRequired=!!APP_PIN;
   try{
     await scFetch('/api/marketplace_accounts');
-    res.json({ok:true,version:'1.0',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
+    res.json({ok:true,version:'1.1',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
   }catch(e){
-    res.status(e.status||500).json({ok:false,version:'1.0',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
+    res.status(e.status||500).json({ok:false,version:'1.1',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
   }
 });
 app.get('/api/lookup',async(req,res)=>{
@@ -104,7 +104,10 @@ app.put('/api/products/:id/activate',async(req,res)=>{
     const before=await detail(req.params.id);
     const beforeN=normalize(before);
     if(beforeN.active) return res.json({ok:true,alreadyActive:true,product:beforeN});
-    await scFetch(`/api/products/${encodeURIComponent(req.params.id)}?relist=true`,{method:'PUT',body:JSON.stringify({})});
+    await scFetch(`/api/products/${encodeURIComponent(req.params.id)}.json?relist=true`,{
+      method:'PUT',
+      body:JSON.stringify({product:{}})
+    });
     let verified=null;
     for(let i=0;i<5;i++){
       if(i) await new Promise(r=>setTimeout(r,900));
@@ -118,4 +121,4 @@ app.put('/api/products/:id/activate',async(req,res)=>{
 
 app.use(express.static(path.join(__dirname,'public')));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-app.listen(PORT,()=>console.log(`Item - Activate Listing V1.0 running on ${PORT}`));
+app.listen(PORT,()=>console.log(`Item - Activate Listing V1.1 running on ${PORT}`));

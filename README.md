@@ -1,4 +1,4 @@
-# SellerChamp Item - Activate Listing V1.0
+# SellerChamp Item - Activate Listing V1.1
 
 A completely independent SellerChamp app for finding a Product by SKU and relisting it when SellerChamp reports the marketplace listing as inactive.
 
@@ -29,3 +29,10 @@ The included `render.yaml` uses:
 - Start: `npm start`
 
 Do not put your SellerChamp API token in `public/`.
+
+## V1.1 fix
+- Corrected the activation request to SellerChamp's documented Product PUT format:
+  `PUT /api/products/PRODUCT_ID.json?relist=true`
+- Sends the required JSON wrapper: `{ "product": {} }`.
+- Activation errors now display SellerChamp's returned error details instead of only a generic message.
+- The app still rereads the Product and reports success only after `marketplace_status` verifies as `active`.
