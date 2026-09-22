@@ -1,0 +1,121 @@
+const express = require('express');
+const path = require('path');
+const crypto = require('crypto');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+const SELLERCHAMP_API_TOKEN = process.env.SELLERCHAMP_API_TOKEN || process.env.SELLERCHAMP_TOKEN || '';
+const APP_PIN = String(process.env.APP_PIN || '').trim();
+const SC_BASE = 'https://app.sellerchamp.com';
+const sessions = new Map();
+
+app.use(express.json({limit:'1mb'}));
+
+function makeSession() {
+  const token=crypto.randomBytes(24).toString('hex');
+  sessions.set(token, Date.now()+30*24*60*60*1000);
+  return token;
+}
+function sessionOK(req) {
+  if (!APP_PIN) return true;
+  const auth=String(req.headers.authorization||'');
+  const token=auth.startsWith('Bearer ')?auth.slice(7):'';
+  const exp=sessions.get(token);
+  if (!exp || exp < Date.now()) { if(token) sessions.delete(token); return false; }
+  return true;
+}
+app.post('/api/login',(req,res)=>{
+  if(!APP_PIN) return res.json({ok:true,pinRequired:false});
+  if(String(req.body?.pin||'')!==APP_PIN) return res.status(401).json({error:'Incorrect PIN.'});
+  res.json({ok:true,pinRequired:true,session:makeSession(),expiresDays:30});
+});
+app.use('/api',(req,res,next)=>{
+  if(req.path==='/status') return next();
+  if(!sessionOK(req)) return res.status(401).json({error:'PIN required.',pinRequired:true});
+  next();
+});
+
+async function scFetch(endpoint, options={}) {
+  if(!SELLERCHAMP_API_TOKEN) {
+    const e=new Error('SELLERCHAMP_API_TOKEN is not configured on Render.'); e.status=500; throw e;
+  }
+  const headers={Accept:'application/json','Content-Type':'application/json',Token:SELLERCHAMP_API_TOKEN,...(options.headers||{})};
+  const r=await fetch(SC_BASE+endpoint,{...options,headers});
+  let data={}; const txt=await r.text();
+  try { data=txt?JSON.parse(txt):{}; } catch { data={raw:txt}; }
+  if(!r.ok){ const e=new Error(`SellerChamp returned ${r.status}`); e.status=r.status; e.data=data; throw e; }
+  return data;
+}
+function rawProduct(data){ return data?.product || data || {}; }
+function statusOf(p){ return String(p.marketplace_status ?? p.status ?? '').trim(); }
+function activeStatus(s){ return String(s).toLowerCase()==='active'; }
+function imageOf(p){
+  const x=p.image_url||p.image||p.main_image_url||p.thumbnail_url||p.picture_url;
+  if(typeof x==='string') return x;
+  if(x?.url) return x.url;
+  const arr=p.images||p.product_images||[];
+  if(Array.isArray(arr)&&arr.length){ const a=arr[0]; return typeof a==='string'?a:(a.url||a.image_url||''); }
+  return '';
+}
+function normalize(p){
+  return {id:p.id,sku:p.sku||p.catalogue_sku||'',title:p.title||p.name||p.product_title||'',
+    marketplace_status:statusOf(p),active:activeStatus(statusOf(p)),image:imageOf(p),
+    quantity:Number(p.quantity_available ?? p.quantity ?? 0),
+    location:p.location||p.item_location||''};
+}
+async function detail(id){
+  const d=await scFetch(`/api/products/${encodeURIComponent(id)}.json`);
+  return rawProduct(d);
+}
+async function findBySku(sku){
+  const d=await scFetch(`/api/products.json?sku=${encodeURIComponent(sku)}&page=1&page_size=50`);
+  let items=d.products||[];
+  if(!Array.isArray(items)) items=items?[items]:[];
+  const exact=items.filter(p=>String(p.sku||'').trim().toLowerCase()===sku.toLowerCase());
+  const pool=exact.length?exact:items;
+  if(!pool.length) return [];
+  const out=[];
+  for(const p of pool.slice(0,10)){
+    try { out.push(normalize(await detail(p.id))); } catch { out.push(normalize(p)); }
+  }
+  return out;
+}
+
+app.get('/api/status',async(req,res)=>{
+  const pinRequired=!!APP_PIN;
+  try{
+    await scFetch('/api/marketplace_accounts');
+    res.json({ok:true,version:'1.0',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
+  }catch(e){
+    res.status(e.status||500).json({ok:false,version:'1.0',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
+  }
+});
+app.get('/api/lookup',async(req,res)=>{
+  const sku=String(req.query.sku||'').trim();
+  if(!sku) return res.status(400).json({error:'Enter an SKU.'});
+  try{
+    const products=await findBySku(sku);
+    if(!products.length) return res.status(404).json({error:`No SellerChamp Product found for SKU ${sku}.`});
+    res.json({products});
+  }catch(e){res.status(e.status||500).json({error:'SellerChamp lookup failed.',details:e.data||e.message});}
+});
+app.put('/api/products/:id/activate',async(req,res)=>{
+  try{
+    const before=await detail(req.params.id);
+    const beforeN=normalize(before);
+    if(beforeN.active) return res.json({ok:true,alreadyActive:true,product:beforeN});
+    await scFetch(`/api/products/${encodeURIComponent(req.params.id)}?relist=true`,{method:'PUT',body:JSON.stringify({})});
+    let verified=null;
+    for(let i=0;i<5;i++){
+      if(i) await new Promise(r=>setTimeout(r,900));
+      verified=normalize(await detail(req.params.id));
+      if(verified.active) break;
+    }
+    if(!verified?.active) return res.status(409).json({error:'SellerChamp accepted the relist request, but the product has not verified as Active yet.',product:verified});
+    res.json({ok:true,verified:true,product:verified});
+  }catch(e){res.status(e.status||500).json({error:'SellerChamp could not activate this listing.',details:e.data||e.message});}
+});
+
+app.use(express.static(path.join(__dirname,'public')));
+app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
+app.listen(PORT,()=>console.log(`Item - Activate Listing V1.0 running on ${PORT}`));
