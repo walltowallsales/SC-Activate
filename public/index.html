@@ -9,7 +9,7 @@ button,a.btn{width:100%;border:0;border-radius:11px;padding:14px;font-size:18px;
 .modal{position:fixed;inset:0;background:#0008;display:none;align-items:center;justify-content:center;padding:20px}.modalbox{background:white;border-radius:16px;padding:22px;max-width:390px;width:100%}.modalbox h2{margin-top:0}.modalbuttons{display:flex;gap:10px}.modalbuttons button{width:50%}
 @media(max-width:520px){.row{display:block}.pic{width:100%;height:190px;margin-bottom:12px}h1{font-size:23px}.conn{font-size:11px}}
 .diag{margin-top:12px;border-top:2px solid #ddd;padding-top:10px}.diag h3{margin:4px 0 8px}.attempt{font-size:13px;line-height:1.35;background:#f5f6f7;border-radius:9px;padding:9px;margin:7px 0;overflow-wrap:anywhere}.attempt strong{font-size:14px}</style></head><body><div class="wrap">
-<header><div><h1>Item - Activate Listing</h1><div class="ver">Version 1.3 • Timed Diagnostic Build</div></div><div id="conn" class="conn">Checking…</div></header>
+<header><div><h1>Item - Activate Listing</h1><div class="ver">Version 1.4 • Relist Diagnostic</div></div><div id="conn" class="conn">Checking…</div></header>
 <div id="login" class="card" style="display:none"><label>App PIN</label><input id="pin" inputmode="numeric" type="password"><button class="search" onclick="login()">Unlock</button><div id="loginmsg"></div></div>
 <div id="main" style="display:none">
 <div class="card"><label for="sku">SKU</label><input id="sku" autocomplete="off" autocapitalize="off" placeholder="Scan or enter SKU"><button class="search" onclick="lookup()">Search SellerChamp</button><div id="searchmsg"></div></div>
@@ -48,7 +48,7 @@ function showDiagnostics(attempts){
 }
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 async function activateNow(){
-  closeModal();showDiagnostics([]);msg('actionmsg','Running activation diagnostics. The app will stop as soon as SellerChamp verifies ACTIVE…');
+  closeModal();showDiagnostics([]);msg('actionmsg','Sending the documented SellerChamp relist request without writing INACTIVE back to the product. If accepted, the app will wait up to 5 minutes…');
   document.getElementById('activate').disabled=true;
   try{
     const d=await api('/api/products/'+encodeURIComponent(current.id)+'/activate',{method:'PUT',body:'{}'});

@@ -85,9 +85,9 @@ app.get('/api/status',async(req,res)=>{
   const pinRequired=!!APP_PIN;
   try{
     await scFetch('/api/marketplace_accounts');
-    res.json({ok:true,version:'1.3',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
+    res.json({ok:true,version:'1.4',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
   }catch(e){
-    res.status(e.status||500).json({ok:false,version:'1.3',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
+    res.status(e.status||500).json({ok:false,version:'1.4',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
   }
 });
 app.get('/api/lookup',async(req,res)=>{
@@ -161,18 +161,16 @@ app.put('/api/products/:id/activate',async(req,res)=>{
     const before=normalize(beforeRaw);
     if(before.active) return res.json({ok:true,alreadyActive:true,product:before,attempts:[]});
 
-    const safeProduct={};
-    for(const k of ['sku','title','quantity_available','reserve_quantity','marketplace_status']){
-      if(beforeRaw[k] !== undefined && beforeRaw[k] !== null) safeProduct[k]=beforeRaw[k];
-    }
+    // V1.4: Never echo marketplace_status:"inactive" back while requesting a relist.
+    const minimalProduct={sku:beforeRaw.sku || before.sku};
 
     const methods=[
-      ['A — .json + relist=true + product payload',`/api/products/${id}.json?relist=true`,{product:safeProduct}],
-      ['B — no .json + relist=true + product payload',`/api/products/${id}?relist=true`,{product:safeProduct}],
-      ['C — .json + relist=true + top-level payload',`/api/products/${id}.json?relist=true`,safeProduct],
-      ['D — no .json + relist=true + top-level payload',`/api/products/${id}?relist=true`,safeProduct],
-      ['E — .json + relist=true + no request body',`/api/products/${id}.json?relist=true`,undefined],
-      ['F — no .json + relist=true + no request body',`/api/products/${id}?relist=true`,undefined]
+      ['A — documented PUT product + relist=true (SKU only)',`/api/products/${id}.json?relist=true`,{product:minimalProduct}],
+      ['B — documented bulk update + relist=true',`/api/products/bulk_update.json`,{
+        marketplace_account_id: beforeRaw.marketplace_account_id,
+        products:[{id:beforeRaw.id || req.params.id,sku:beforeRaw.sku || before.sku}],
+        relist:true
+      }]
     ];
 
     for(const [name,endpoint,body] of methods){
@@ -207,4 +205,4 @@ app.put('/api/products/:id/activate',async(req,res)=>{
 
 app.use(express.static(path.join(__dirname,'public')));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-app.listen(PORT,()=>console.log(`Item - Activate Listing V1.3 running on ${PORT}`));
+app.listen(PORT,()=>console.log(`Item - Activate Listing V1.4 running on ${PORT}`));

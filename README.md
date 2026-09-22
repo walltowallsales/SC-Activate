@@ -63,3 +63,13 @@ copied into any other app.
 - Diagnostic display includes accepted/rejected state and the timed status-check history.
 
 This avoids accidentally issuing several relist requests while SellerChamp/eBay is still processing the first accepted request.
+
+## V1.4 critical relist correction
+SellerChamp's current API reference documents `PUT /api/products/PRODUCT_ID.json?relist=true`
+with a `product` JSON object. V1.3 also echoed `marketplace_status: "inactive"` in that
+payload. V1.4 removes marketplace_status entirely from activation requests.
+
+Method A sends only the existing SKU inside `product` with `relist=true`.
+If A is immediately rejected, Method B tests SellerChamp's documented bulk product update
+with top-level `relist: true`. Once any request is accepted, no second relist is sent and
+the app polls status every 10 seconds for up to five minutes.
