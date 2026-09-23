@@ -73,3 +73,10 @@ Method A sends only the existing SKU inside `product` with `relist=true`.
 If A is immediately rejected, Method B tests SellerChamp's documented bulk product update
 with top-level `relist: true`. Once any request is accepted, no second relist is sent and
 the app polls status every 10 seconds for up to five minutes.
+
+## V1.5 — Bulk Relist Diagnostic
+The successful SellerChamp web-interface capture used its internal logged-in `reactivate`
+action. V1.5 does not store or reuse browser cookies or authenticity tokens. It instead
+tests SellerChamp's documented API bulk-update endpoint with `relist: true`, using the
+product ID/SKU. One request is sent; if accepted, status is checked every 10 seconds for
+up to five minutes.

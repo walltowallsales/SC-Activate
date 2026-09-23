@@ -85,9 +85,9 @@ app.get('/api/status',async(req,res)=>{
   const pinRequired=!!APP_PIN;
   try{
     await scFetch('/api/marketplace_accounts');
-    res.json({ok:true,version:'1.4',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
+    res.json({ok:true,version:'1.5',pinRequired,authenticated:sessionOK(req),sellerchampConnected:true});
   }catch(e){
-    res.status(e.status||500).json({ok:false,version:'1.4',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
+    res.status(e.status||500).json({ok:false,version:'1.5',pinRequired,authenticated:sessionOK(req),sellerchampConnected:false,error:'Could not connect to SellerChamp.',details:e.data||e.message});
   }
 });
 app.get('/api/lookup',async(req,res)=>{
@@ -165,9 +165,8 @@ app.put('/api/products/:id/activate',async(req,res)=>{
     const minimalProduct={sku:beforeRaw.sku || before.sku};
 
     const methods=[
-      ['A — documented PUT product + relist=true (SKU only)',`/api/products/${id}.json?relist=true`,{product:minimalProduct}],
-      ['B — documented bulk update + relist=true',`/api/products/bulk_update.json`,{
-        marketplace_account_id: beforeRaw.marketplace_account_id,
+      ['A — API bulk_update + relist=true',`/api/products/bulk_update.json`,{
+        ...(beforeRaw.marketplace_account_id ? {marketplace_account_id:beforeRaw.marketplace_account_id} : {}),
         products:[{id:beforeRaw.id || req.params.id,sku:beforeRaw.sku || before.sku}],
         relist:true
       }]
@@ -205,4 +204,4 @@ app.put('/api/products/:id/activate',async(req,res)=>{
 
 app.use(express.static(path.join(__dirname,'public')));
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
-app.listen(PORT,()=>console.log(`Item - Activate Listing V1.4 running on ${PORT}`));
+app.listen(PORT,()=>console.log(`Item - Activate Listing V1.5 running on ${PORT}`));
